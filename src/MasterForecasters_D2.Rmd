@@ -81,13 +81,14 @@ firstobs <- data$DATE_TIME[1] %>% as.character
 lastobs <- data$DATE_TIME[length(data$DATE_TIME)] %>% as.character
 timeinterval <- data$DATE_TIME[2] - data$DATE_TIME[1]
 numintervals <- length(data$DATE_TIME)
-```
 #| DATE_TIME                             |
 #| ------------------------------------- |
 #| First Obsevation: `r firstobs`        |
 #| Last Observation: `r lastobs`         |
 #| Time interval (min): `r timeinterval` |
 #| Number of intervals: `r numintervals` |
+```
+
 
 ```{r data-summary, echo=FALSE}
 # "DATE_TIME","AIRTEMP","RH_AVG","DEWPT","WS","GHI","DNI","DIFF","POA"
