@@ -9,7 +9,7 @@ output:
     toc_depth: 2
     number_sections: true
 ---
-```{r load-packages, echo=FALSE, message=FALSE}
+```{r load-packages, echo=FALSE, message=FALSE, warning = FALSE}
 # Load necessary packages
 library(ggplot2)
 library(fpp3)
