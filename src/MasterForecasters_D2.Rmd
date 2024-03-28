@@ -31,9 +31,10 @@ library(GGally)
 | Laila Saleh   | Data Transforms and Visualizations |
 | Daniel Moore  | .Rmd organization                  |
 
+\newpage
 # Executive Summary {-}
 The purpose of this submission is to demonstrate our progress in the forecasting class competition, solicit feedback, and provide our forecast for the "S2" period. This is the draft version of the final report with sections marked To Be Completed (TBC) indicating our plan for future work. Thus far we have looked for trends and correlation in the data, considered outside variables, identified the data transformation we will use, and created some basic models for consideration as well as outlining more complex candidate models we might use. While it exceeds the five-page requirement, we believe that submission of the final report in draft form will allow for more comprehensive feedback and a more polished final product.
-\newpage
+
 
 # Data Exploration
 Our task is to predict the Plane of Array (POA) Irradiance $\left( \frac{W}{m^2} \right)$ for measurements made at the Rutgers University Energy Lab at Richard Weeks Hall in 10-minute increments for the next 12-hours. The POA has been measured by a pyranometer with the same orientation as the solar array. This measurement is critical for modeling the performance of a Photo-Voltaic (PV) system. Predicting future POA enables operators to plan for optimize Distributed Energy Resources (DER).
@@ -81,12 +82,12 @@ lastobs <- data$DATE_TIME[length(data$DATE_TIME)] %>% as.character
 timeinterval <- data$DATE_TIME[2] - data$DATE_TIME[1]
 numintervals <- length(data$DATE_TIME)
 ```
-| DATE_TIME                             |
-| ------------------------------------- |
-| First Obsevation: `r firstobs`        |
-| Last Observation: `r lastobs`         |
-| Time interval (min): `r timeinterval` |
-| Number of intervals: `r numintervals` |
+#| DATE_TIME                             |
+#| ------------------------------------- |
+#| First Obsevation: `r firstobs`        |
+#| Last Observation: `r lastobs`         |
+#| Time interval (min): `r timeinterval` |
+#| Number of intervals: `r numintervals` |
 
 ```{r data-summary, echo=FALSE}
 # "DATE_TIME","AIRTEMP","RH_AVG","DEWPT","WS","GHI","DNI","DIFF","POA"
@@ -101,19 +102,21 @@ Correlation plots and data visualizations are shown in the subsequent section. I
 ### POA vs. Time
 First, we want to visualize our target variable, POA, vs. Time to get a sense of its characteristics. The first thing we notice is the expected daily cycle when looking at the entire dataset. Mostly we see each day is roughly the same but then there are occasional days where the POA is much lower. Next we look at a plot of 1-week of data and this is even more pronounced as we have what appears to be two "typical" days followed by several days intermittent degraded POA.
 
-```{r POA-lineplot, echo=FALSE}
+```{r POA-lineplot, echo=FALSE, warning = FALSE, fig.height = 3}
 # give the chart below a title "POA vs. Time"
 POA_vs_TIME <- data %>%
   ggplot(aes(x=DATE_TIME)) +
   geom_line(aes(y = POA)) +
   labs(title = "POA vs. Time") +
-  theme_minimal()
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 POA_vs_1WEEK <- data[1:(6 * 24 * 7),] %>%
   ggplot(aes(x=DATE_TIME)) +
   geom_line(aes(y = POA)) +
   labs(title = "POA vs. Time (1 Week)") +
-  theme_minimal()
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 POA_vs_TIME / POA_vs_1WEEK
 ```
@@ -152,28 +155,32 @@ seasonal_line <- data %>% ggplot(aes(x = TIME, y = POA, group = DAYOFYEAR)) +
   scale_color_gradientn(colors = viridis::viridis(256, option = "D")) +
   theme_minimal() +
   labs(color = "Day of Year") +
-  xlab("Time") + ylab(expression("Irradiance ("*W/m^2*")"))
+  xlab("Time") + ylab(expression("Irradiance ("*W/m^2*")")) +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 seasonal_polar <- data %>% ggplot(aes(x = TIME, y = POA, group = DAYOFYEAR)) +
   geom_line(aes(color = DAYOFYEAR)) +  # Map DayOfYear to color
   scale_color_gradientn(colors = viridis::viridis(256, option = "D")) +
   coord_polar() +
   theme_minimal() +
-  labs(color = "Day of Year")
+  labs(color = "Day of Year") +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 seasonal_mean_lines <- mean_time_df %>%
   ggplot(aes(x = TIME, y = POA_Mean)) +
   geom_ribbon(aes(ymin = POA_Mean - POA_Std, ymax = POA_Mean + POA_Std), fill = "lightblue", alpha = 0.5) +
   geom_line() +
   theme_minimal() +
-  labs(x = "Time of Day", y = "Mean POA")
+  labs(x = "Time of Day", y = "Mean POA") +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 seasonal_mean_polar <- mean_time_df %>%
   ggplot(aes(x = TIME, y = POA_Mean)) +
   geom_ribbon(aes(ymin = POA_Mean - POA_Std, ymax = POA_Mean + POA_Std), fill = "lightblue", alpha = 0.5) +
   geom_line() +
   coord_polar() +
-  theme_minimal()
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 (seasonal_line + seasonal_polar) / (seasonal_mean_lines + seasonal_mean_polar)
 ```
@@ -205,16 +212,17 @@ my_fn <- function(data, mapping, method="p", use="pairwise", ...){
 }
 ```
 Below we examine the correlation amongst the provided exogenous variables and the target variable, POA. First we notice that the other Irradiance values are, as expected, highly correlated to the POA. This offers the possibility of instead forecasting those variables if they appear any more predictable.
-```{r irradiance-pair-plot, echo=FALSE, message=FALSE, warning=FALSE}
+```{r irradiance-pair-plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=6,fig.height=3}
 ggpairs(data %>% select(GHI, DNI, DIFF, POA),
   upper = list(continuous = my_fn),
-  lower = list(continuous = "smooth"))
+  lower = list(continuous = wrap("points", alpha = 0.3,    size=0.07))) +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 ```
 Next we look for correlations amongst the time and atmospheric conditions. Time has been transformed here to be the $-cos(time)$ with time in radians. While not novel, we can see there is a strong correlation here which provides quantifiable justification to our selection of daily seasonality. There is not especially strong correlation elsewhere that would lead to any new understanding of the data. Essentially, we know when the sun shines and how that feels, and POA is high when the sun in shining.
-```{r exogenous-pair-plot, echo=FALSE, message=FALSE, warning=FALSE}
+```{r exogenous-pair-plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=6,fig.height=3}
 ggpairs(data %>% select(NEG_COS_TIME, AIRTEMP, RH_AVG, DEWPT, POA),
   upper = list(continuous = my_fn),
-  lower = list(continuous = "smooth"))
+  lower = list(continuous = wrap("points", alpha = 0.3,    size=0.07)))
 ```
 
 ## Data Transformation
@@ -224,13 +232,15 @@ We explored several data transforms so that the POA data would be more normally 
 POA_hist <- data %>%
   ggplot(aes(x = POA)) +
   geom_histogram() +
-  theme_minimal()
+  theme_minimal()  +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 # assing POA_QQ to a QQ plot of POA
 POA_QQ <- data %>%
   ggplot(aes(sample = POA)) +
   stat_qq() +
-  theme_minimal()
+  theme_minimal()  +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 ```
 
 ```{r box-cox-transform, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
@@ -241,13 +251,15 @@ data <- data %>%
 POA_BC_hist <- data %>%
   ggplot(aes(x = POA_BC)) +
   geom_histogram()
-  theme_minimal()
+  theme_minimal()  +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 # assing POA_YJ_QQ to a QQ plot of POA_YJ
 POA_BC_QQ <- data %>%
   ggplot(aes(sample = POA_BC)) +
   stat_qq() +
-  theme_minimal()
+  theme_minimal()  +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 ```
 
 ```{r yeo-johnson-transform, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
@@ -259,13 +271,15 @@ data <- data %>%
 POA_YJ_hist <- data %>%
   ggplot(aes(x = POA_YJ)) +
   geom_histogram()
-  theme_minimal()
+  theme_minimal()  +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 # assing POA_YJ_QQ to a QQ plot of POA_YJ
 POA_YJ_QQ <- data %>%
   ggplot(aes(sample = POA_YJ)) +
   stat_qq() +
-  theme_minimal()
+  theme_minimal()  +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 ```
 
 ```{r log-diff-transform, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
@@ -276,18 +290,20 @@ data <- data %>%
 POA_LOG_DIFF_QQ <- data %>%
   ggplot(aes(sample = POA_LOG_DIF)) +
   stat_qq() +
-  theme_minimal()
+  theme_minimal()  +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 
 POA_LOG_DIFF_hist <- data %>%
   ggplot(aes(x = POA_LOG_DIF)) +
   geom_histogram()
-  theme_minimal()
+  theme_minimal()  +
+  theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 ```
 ```{r transform-graphs, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
 (POA_hist + POA_QQ) /
 (POA_BC_hist + POA_BC_QQ) /
 (POA_YJ_hist + POA_YJ_QQ) /
-(POA_LOG_DIFF_QQ + POA_LOG_DIFF_QQ)
+(POA_LOG_DIFF_hist + POA_LOG_DIFF_QQ)
 ```
 As seen in the plots above, the power transforms did not change the original distribution significantly. The log transform on the first-order differenced data appears to be the most successful. We will use this for our models and note that the exogenous variables will likely require the same transformation if we want to incorporate them.
 
