@@ -96,6 +96,16 @@ summary(data[, 6:9]) %>% kable
 
 Correlation plots and data visualizations are shown in the subsequent section. It is noteworthy that the other Irradiance measurements have negative values while we would expect non-negative values and this warrants further investigation.
 
+## Potential External Data
+We expect that weather foecasts would be excellent predictors of the POA at a given time of day since our prediction window is so close to the present that hourly forecasts would be available. Even for forecasts several days out having the general daily forecast such as "High of 75, mostly cloudy" would greatly improve any model. We have not yet located a source of historical forecasts and are not sure if they exist. We have identified these alternatives
+
+- Use the actual historical weather data as a proxy for the forecast.
+- Use the actual historicla weather data but add some random noise to simulate error in the forecast.
+- Use forecast(s) from relatively nearby locations, such as Newark Airport, which would have similar weather but be far enough away to simulate some weather forecasting error.
+- Continue without the external data. The advantage of this approach is that it would allow all data collection, processing, and predictions to occur locally with the solar array on something like a Raspberry Pi with no need for integrations which can sometimes be broken for any number of reasons.
+
+Once we observe the limits of our models' forecasting ability we will make a determiniation about the necessity of external data.
+
 ## Data Visualization
 
 ### POA vs. Time
