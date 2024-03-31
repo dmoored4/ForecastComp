@@ -321,9 +321,10 @@ POA_LOG_DIFF_hist <- data %>%
 As seen in the plots above, the power transforms did not change the original distribution significantly. The log transform on the first-order differenced data appears to be the most successful. We will use this for our models and note that the exogenous variables will likely require the same transformation if we want to incorporate them.
 
 # Models
+The models used are detailed below. The numbers in parenthesis after the model indicate the testing period(s) they were considered for and a $asterix$ indicates it was the selected model for that period.
 
-## 1-Day Lagged Naïve
-A 1-Day Lagged Naïve (hereafter referred to as "Naïve") provided forecasts for our first prediction and demonstrated its efficacy. Interestingly, the Naïve model underperformed for the Mean Absolute Error (MAE) benchmark compared to a Seasonal Mean. However, we opted for the Naïve because the first few hours of the day we needed to forecast the rest of looked very similar to the first few hours of the previous day. The Seasonal Mean, on the other hand, underpredicted the POA.
+## 1-Day Lagged Naïve (S1*, S2)
+
 ```{r, echo=FALSE}
 # Create a function which will take in a date and time and retrieve the POA
 # from data (default argument) from 24 hours ago
@@ -353,19 +354,52 @@ Seasonal Autoregressive Integrated Moving Average (SARIMA)d
 # use auto.arima with sesaonlity = 6 * 24
 ```
 
-# Comparisons
-### TO DO:
-- Plot the Naïve and Seasonal Mean against the actual POA for the first test period
-- Calculat the MAE and RMSE for the Naïve and Seasonal Mean
+# Model Performance
+## Error Quantification and Model Selection
+As the competition is scoring is based on Mean Absolute Error (MAE), we will use the same metric to compare our models.
 
-## Qualitative Assessments
+$$MAE = \frac{1}{n} \sum_{i=1}^{n} |y_i - \hat{y}_i|$$
 
-## Error Quantification
+Other error measures can inform other aspects about a model's performance and may be used in addition to MAE for diagnostic purposes. The model and error measures are detailed below by testing period.
 
-# Conclusions
+### S1 Train and Test Error
 
-## Model Selection
+| Model | MAE   | RMSE   |
+| ----- | ----- | ------ |
+| Naïve | 144.83 | 272.21 |
+| Seasonal Mean | 144.83 | 272.21 |
 
-## Forecast
+A 1-Day Lagged Naïve (hereafter referred to as "Naïve") provided forecasts for our first prediction and demonstrated its efficacy. Interestingly, the Naïve model underperformed for the Mean Absolute Error (MAE) benchmark compared to a Seasonal Mean. However, we opted for the Naïve because the first few hours of the day we needed to forecast the rest of looked very similar to the first few hours of the previous day. The Seasonal Mean, on the other hand, underpredicted the POA.
 
-## Discussion
+### S2 Train and Test Error
+
+### S3 Train and Test Error
+TBC
+
+### S1 Train and Test Error
+TBC
+
+## Model Selection and Forecasts
+The table below summarizes our selected model as well as forecast MAE and RMSE for each tesitng period. The subsequent sections provide additional discussion and figures about the forecast error for each period.
+
+| Testing Period | Selected Model | MAE    | RMSE   |
+| -------------- | -------------- | ------ | ------ |
+| S1             | Naïve          | 144.83 | 272.21 |
+| S2             | SARIMA         | TBD    | TBD    |
+| S3             | TBD            | TBD    | TBD    |
+| S4             | TBD            | TBD    | TBD    |
+
+### S1 Forecasting Error
+
+
+### S2 Forecasting Error
+TBC
+
+### S3 Forecasting Error
+TBC
+
+### S1 Forecasting Error
+TBC
+
+# Conclusion
+Thus far we have 
