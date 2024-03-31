@@ -25,6 +25,7 @@ library(VGAM)
 library(tinytex)
 library(GGally)
 ```
+
 | Name          | Major Contribution                 |
 | ------------- | ---------------------------------- |
 | Cory Petersen | Model                              |
@@ -35,11 +36,8 @@ library(GGally)
 # Executive Summary {-}
 The purpose of this submission is to demonstrate our progress in the forecasting class competition, solicit feedback, and provide our forecast for the "S2" period. This is the draft version of the final report with sections marked To Be Completed (TBC) indicating our plan for future work. Thus far we have looked for trends and correlation in the data, considered outside variables, identified the data transformation we will use, and created some basic models for consideration as well as outlining more complex candidate models we might use. While it exceeds the five-page requirement, we believe that submission of the final report in draft form will allow for more comprehensive feedback and a more polished final product.
 
-
 # Data Exploration
-Our task is to predict the Plane of Array (POA) Irradiance $\left( \frac{W}{m^2} \right)$ for measurements made at the Rutgers University Energy Lab at Richard Weeks Hall in 10-minute increments for the next 12-hours. The POA has been measured by a pyranometer with the same orientation as the solar array. This measurement is critical for modeling the performance of a Photo-Voltaic (PV) system. Predicting future POA enables operators to plan for optimize Distributed Energy Resources (DER).
-
-The data is provided in 10-minute increments from June 1, 2023 to August 2, 2023 with the following measurements:
+Our task is to predict the Plane of Array (POA) Irradiance $\left( \frac{W}{m^2} \right)$ for measurements made at the Rutgers University Energy Lab at Richard Weeks Hall in 10-minute increments for the next 12-hours. The POA has been measured by a pyranometer with the same orientation as the solar array. This measurement is critical for modeling the performance of a Photo-Voltaic (PV) system. Predicting future POA enables operators to plan for optimize Distributed Energy Resources (DER). The data is provided in 10-minute increments from June 1, 2023 to August 2, 2023 with the following measurements:
 
 - DATE_TIME: Date/time information
 - AIRTEMP: Air temperature $(\mathrm{C})$
@@ -81,14 +79,13 @@ firstobs <- data$DATE_TIME[1] %>% as.character
 lastobs <- data$DATE_TIME[length(data$DATE_TIME)] %>% as.character
 timeinterval <- data$DATE_TIME[2] - data$DATE_TIME[1]
 numintervals <- length(data$DATE_TIME)
-#| DATE_TIME                             |
-#| ------------------------------------- |
-#| First Obsevation: `r firstobs`        |
-#| Last Observation: `r lastobs`         |
-#| Time interval (min): `r timeinterval` |
-#| Number of intervals: `r numintervals` |
 ```
-
+| DATE_TIME                             |
+| ------------------------------------- |
+| First Obsevation: `r firstobs`        |
+| Last Observation: `r lastobs`         |
+| Time interval (min): `r timeinterval` |
+| Number of intervals: `r numintervals` |
 
 ```{r data-summary, echo=FALSE}
 # "DATE_TIME","AIRTEMP","RH_AVG","DEWPT","WS","GHI","DNI","DIFF","POA"
@@ -96,6 +93,7 @@ numintervals <- length(data$DATE_TIME)
 summary(data[, 2:5]) %>% kable
 summary(data[, 6:9]) %>% kable
 ```
+
 Correlation plots and data visualizations are shown in the subsequent section. It is noteworthy that the other Irradiance measurements have negative values while we would expect non-negative values and this warrants further investigation.
 
 ## Data Visualization
@@ -212,14 +210,18 @@ my_fn <- function(data, mapping, method="p", use="pairwise", ...){
   theme(panel.background = element_rect(fill=fill))
 }
 ```
+
 Below we examine the correlation amongst the provided exogenous variables and the target variable, POA. First we notice that the other Irradiance values are, as expected, highly correlated to the POA. This offers the possibility of instead forecasting those variables if they appear any more predictable.
+
 ```{r irradiance-pair-plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=6,fig.height=3}
 ggpairs(data %>% select(GHI, DNI, DIFF, POA),
   upper = list(continuous = my_fn),
   lower = list(continuous = wrap("points", alpha = 0.3,    size=0.07))) +
   theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 ```
+
 Next we look for correlations amongst the time and atmospheric conditions. Time has been transformed here to be the $-cos(time)$ with time in radians. While not novel, we can see there is a strong correlation here which provides quantifiable justification to our selection of daily seasonality. There is not especially strong correlation elsewhere that would lead to any new understanding of the data. Essentially, we know when the sun shines and how that feels, and POA is high when the sun in shining.
+
 ```{r exogenous-pair-plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=6,fig.height=3}
 ggpairs(data %>% select(NEG_COS_TIME, AIRTEMP, RH_AVG, DEWPT, POA),
   upper = list(continuous = my_fn),
