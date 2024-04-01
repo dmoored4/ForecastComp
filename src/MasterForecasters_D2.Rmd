@@ -9,6 +9,7 @@ output:
     toc_depth: 2
     number_sections: true
 ---
+
 ```{r load-packages, echo=FALSE, message=FALSE, warning = FALSE}
 # Load necessary packages
 library(ggplot2)
@@ -27,30 +28,35 @@ library(GGally)
 ```
 
 | Name          | Major Contribution                 |
-| ------------- | ---------------------------------- |
+|---------------|------------------------------------|
 | Cory Petersen | Model                              |
 | Laila Saleh   | Data Transforms and Visualizations |
 | Daniel Moore  | .Rmd organization                  |
 
 \newpage
-# Executive Summary {-}
+
+# Executive Summary {.unnumbered}
+
 The purpose of this submission is to demonstrate our progress in the forecasting class competition, solicit feedback, and provide our forecast for the "S2" period. This is the draft version of the final report with sections marked To Be Completed (TBC) indicating our plan for future work. Thus far we have looked for trends and correlation in the data, considered outside variables, identified the data transformation we will use, and created some basic models for consideration as well as outlining more complex candidate models we might use. While it exceeds the five-page requirement, we believe that submission of the final report in draft form will allow for more comprehensive feedback and a more polished final product.
 
 # Data Exploration
+
 Our task is to predict the Plane of Array (POA) Irradiance $\left( \frac{W}{m^2} \right)$ for measurements made at the Rutgers University Energy Lab at Richard Weeks Hall in 10-minute increments for the next 12-hours. The POA has been measured by a pyranometer with the same orientation as the solar array. This measurement is critical for modeling the performance of a Photo-Voltaic (PV) system. Predicting future POA enables operators to plan for optimize Distributed Energy Resources (DER). The data is provided in 10-minute increments from June 1, 2023 to August 2, 2023 with the following measurements:
 
-- DATE_TIME: Date/time information
-- AIRTEMP: Air temperature $(\mathrm{C})$
-- RH_AVG: Humidity $(\mathrm{\%})$
-- DEWPT: Dew point temperature $(\mathrm{C})$
-- WS: Wind speed $\left(\frac{m}{s}\right)$
-- GHI: Global Horizontal Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
-- DNI: Direct Normal Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
-- DIFF: Diffuse Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
-- POA: Plane-of-Array Irradiance $\left( \frac{W}{m^2} \right)$ measured from a pyranometer that has the exact same tilting
+-   DATE_TIME: Date/time information
+-   AIRTEMP: Air temperature $(\mathrm{C})$
+-   RH_AVG: Humidity $(\mathrm{\%})$
+-   DEWPT: Dew point temperature $(\mathrm{C})$
+-   WS: Wind speed $\left(\frac{m}{s}\right)$
+-   GHI: Global Horizontal Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   DNI: Direct Normal Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   DIFF: Diffuse Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   POA: Plane-of-Array Irradiance $\left( \frac{W}{m^2} \right)$ measured from a pyranometer that has the exact same tilting
 
 ## Loading the Data
+
 We have been provided with two datasets thus far, "Data_S1.CSV" and "Data_S2.CSV". The data has been concatenated with duplicates removed and the time processed to a `POSIXct` format for compatibility with the packages used. Below is a look at observations made around noon on June, 4, 2023.
+
 ```{r load-data, echo=FALSE}
 # Load the data from "data/Data_S1.CSV" and "data/Data_S2.CSV"
 data <- read.csv("data/Data_S1.CSV")
@@ -61,18 +67,29 @@ data$DATE_TIME <- as.POSIXct(data$DATE_TIME, format = "%Y-%m-%d %H:%M:%S")
 
 # delete duplicates based on DATE_TIME
 data <- data[!duplicated(data$DATE_TIME),]
+```
 
+We partition the data by recieved datasets and according to a train/test split which used 80% of the data for training and reserves 20% for evaluating the models on unseen data.
+
+```{r, train-test-split, echo=FALSE}
 # create a train and test index
 train_test_split <- 4/5
-train_index <- 1:floor(nrow(data) * train_test_split)
+s1 <- 1:8859
+s1_train <- 1:floor(last(s1) * train_test_split)
+s1_test <- 1+last(s1_train):last(s1)
 
-# create a validate index which is the second half of rows from S2
-validate_index <- (max(train_index) + 1):nrow(data)
+s2 <- 1:9001
+s2_train <- 1:floor(last(s2) * train_test_split)
+s2_test <- 1+last(s2_train):last(s2)
+```
 
+```{r, data-head, echo=FALSE}
 # Displaying data where POA !=0
 kable(head(data[500:506, ]))
 ```
+
 The tables below provide summary statistics of the variables.
+
 ```{r DATE_TIME-summary, echo=FALSE}
 # give the first and last value of the DATE_TIME and the increments
 firstobs <- data$DATE_TIME[1] %>% as.character
@@ -80,8 +97,9 @@ lastobs <- data$DATE_TIME[length(data$DATE_TIME)] %>% as.character
 timeinterval <- data$DATE_TIME[2] - data$DATE_TIME[1]
 numintervals <- length(data$DATE_TIME)
 ```
+
 | DATE_TIME                             |
-| ------------------------------------- |
+|---------------------------------------|
 | First Obsevation: `r firstobs`        |
 | Last Observation: `r lastobs`         |
 | Time interval (min): `r timeinterval` |
@@ -97,18 +115,20 @@ summary(data[, 6:9]) %>% kable
 Correlation plots and data visualizations are shown in the subsequent section. It is noteworthy that the other Irradiance measurements have negative values while we would expect non-negative values and this warrants further investigation.
 
 ## Potential External Data
+
 We expect that weather foecasts would be excellent predictors of the POA at a given time of day since our prediction window is so close to the present that hourly forecasts would be available. Even for forecasts several days out having the general daily forecast such as "High of 75, mostly cloudy" would greatly improve any model. We have not yet located a source of historical forecasts and are not sure if they exist. We have identified these alternatives
 
-- Use the actual historical weather data as a proxy for the forecast.
-- Use the actual historicla weather data but add some random noise to simulate error in the forecast.
-- Use forecast(s) from relatively nearby locations, such as Newark Airport, which would have similar weather but be far enough away to simulate some weather forecasting error.
-- Continue without the external data. The advantage of this approach is that it would allow all data collection, processing, and predictions to occur locally with the solar array on something like a Raspberry Pi with no need for integrations which can sometimes be broken for any number of reasons.
+-   Use the actual historical weather data as a proxy for the forecast.
+-   Use the actual historicla weather data but add some random noise to simulate error in the forecast.
+-   Use forecast(s) from relatively nearby locations, such as Newark Airport, which would have similar weather but be far enough away to simulate some weather forecasting error.
+-   Continue without the external data. The advantage of this approach is that it would allow all data collection, processing, and predictions to occur locally with the solar array on something like a Raspberry Pi with no need for integrations which can sometimes be broken for any number of reasons.
 
 Once we observe the limits of our models' forecasting ability we will make a determiniation about the necessity of external data.
 
 ## Data Visualization
 
 ### POA vs. Time
+
 First, we want to visualize our target variable, POA, vs. Time to get a sense of its characteristics. The first thing we notice is the expected daily cycle when looking at the entire dataset. Mostly we see each day is roughly the same but then there are occasional days where the POA is much lower. Next we look at a plot of 1-week of data and this is even more pronounced as we have what appears to be two "typical" days followed by several days intermittent degraded POA.
 
 ```{r POA-lineplot, echo=FALSE, warning = FALSE, fig.height = 3}
@@ -140,6 +160,7 @@ data <- data %>%
 ```
 
 ### Seasonal POA
+
 Below are seasonal plots for the POA vs. Time of Day. The top plots are the POA grouped and colored by day of year while the bottom shows the average POA at each time and the standard deviation (Total Confidence Interval (CI) = 68%) The left plots show a typical line plot while the right display time on a polar axis. We observe there is a maximum POA at each time of day that many days reach, but we also observe that each time contains POA values from zero up to that maximum with much randomness that causes the POA to fall sharply and then return. This is almost certainly related to clouds or storms casting shadows on the solar array. While the general weather conditions forecasts are accurate, when exactly a cloud is going to pass between the sun and the solar array is unknowable.
 
 It is interesting that in the left plots, we see a slow rise around dawn, then a steep ascent to near the peak followed by roughly the reverse following noon. When we convert this to polar, we see what appears to be a simpler function as the POA grows radially from zero at dawn gradually to a maximum and then returns to zero at sunset genearlly tracing a circle. It is also interesting that viewed this way, the CI lower bound is 1/2 radius of the mean and the upper bound is 3/2 the radius of the mean. Animating this over a year we would see circle grow and rock back and forth a bit with the changing of the seasons in a very predictable manner.
@@ -195,6 +216,7 @@ seasonal_mean_polar <- mean_time_df %>%
 ```
 
 ### Exogenous Variable Correlations
+
 ```{r pair-plot, echo=FALSE, message=FALSE, warning=FALSE}
 # Convert time to decimal
 data <- data %>% mutate(
@@ -239,7 +261,9 @@ ggpairs(data %>% select(NEG_COS_TIME, AIRTEMP, RH_AVG, DEWPT, POA),
 ```
 
 ## Data Transformation
+
 We explored several data transforms so that the POA data would be more normally distributed to allow us to use common forecasting models. Box-Cox and Yeo-Johnson did not provide the desired results for differenced or undifferenced data. The log transform performed reasonably well on first-order differenced data.
+
 ```{r hist-qq-POA, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
 # assign POA_hist to a histogram of POA
 POA_hist <- data %>%
@@ -312,23 +336,41 @@ POA_LOG_DIFF_hist <- data %>%
   theme_minimal()  +
   theme(panel.border = element_rect(color = "gray", fill = NA, size = 1))
 ```
+
 ```{r transform-graphs, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
 (POA_hist + POA_QQ) /
 (POA_BC_hist + POA_BC_QQ) /
 (POA_YJ_hist + POA_YJ_QQ) /
 (POA_LOG_DIFF_hist + POA_LOG_DIFF_QQ)
 ```
+
 As seen in the plots above, the power transforms did not change the original distribution significantly. The log transform on the first-order differenced data appears to be the most successful. We will use this for our models and note that the exogenous variables will likely require the same transformation if we want to incorporate them.
 
 # Models
-The models used are detailed below. The numbers in parenthesis after the model indicate the testing period(s) they were considered for and a $asterix$ indicates it was the selected model for that period.
 
-## 1-Day Lagged Naïve (S1*, S2)
+The models used are detailed below. The numbers in parenthesis after the model indicate the testing period(s) they were considered for and a \* indicates it was the selected model for that period.
 
-```{r, echo=FALSE}
+```{r}
+POA_TS_s1 <- ts(data$POA[s1_train], frequency = 6*24)
+```
+
+```{r}
+Arima(POA_TS, )
+```
+
+## 1-Day Lagged Naïve (S1\*, S2)
+```{r, seasonal-naive, echo=FALSE}
+POA_snaive <- snaive(POA_TS, h = 250)
+autoplot(POA_snaive)
+```
+```{r}
+POA_snaive$fitted
+```
+
+```{r}
 # Create a function which will take in a date and time and retrieve the POA
 # from data (default argument) from 24 hours ago
-naive <- function(date_time, data = data) {
+naive <- function(date_time[s1_train], data = data) {
   # Subtract 24 hours from the date_time
   date_time <- date_time - hours(24)
   # Extract the POA from the data
@@ -345,17 +387,20 @@ naive <- function(date_time, data = data) {
 ```
 
 ## Seasonal Mean
-There is clearly no reason to explore a "mean" forecast due to the obvious daily cycle. The seasonal mean, however, does seem to offer a reasonable forecast. However, as discussed above, there might not ever be a "mean" day. The seasonal mean may be better for longer term forecasting or to influence more complex models, but may not be useful on its own.
+There is clearly no reason to explore a "mean" forecast due to the obvious daily cycle. The seasonal mean, however, does seem to offer a reasonable forecast.
 
 ## SARIMA
 Seasonal Autoregressive Integrated Moving Average (SARIMA)d
+
 ```{r build-sarima, echo=FALSE}
 # train a SARIMA model on the train_index POA
 # use auto.arima with sesaonlity = 6 * 24
 ```
 
-# Model Performance
-## Error Quantification and Model Selection
+# Forecasts
+
+## Error Quantification and Model Training Performance
+
 As the competition is scoring is based on Mean Absolute Error (MAE), we will use the same metric to compare our models.
 
 $$MAE = \frac{1}{n} \sum_{i=1}^{n} |y_i - \hat{y}_i|$$
@@ -364,9 +409,9 @@ Other error measures can inform other aspects about a model's performance and ma
 
 ### S1 Train and Test Error
 
-| Model | MAE   | RMSE   |
-| ----- | ----- | ------ |
-| Naïve | 144.83 | 272.21 |
+| Model         | MAE    | RMSE   |
+|---------------|--------|--------|
+| Naïve         | 144.83 | 272.21 |
 | Seasonal Mean | 144.83 | 272.21 |
 
 A 1-Day Lagged Naïve (hereafter referred to as "Naïve") provided forecasts for our first prediction and demonstrated its efficacy. Interestingly, the Naïve model underperformed for the Mean Absolute Error (MAE) benchmark compared to a Seasonal Mean. However, we opted for the Naïve because the first few hours of the day we needed to forecast the rest of looked very similar to the first few hours of the previous day. The Seasonal Mean, on the other hand, underpredicted the POA.
@@ -374,16 +419,19 @@ A 1-Day Lagged Naïve (hereafter referred to as "Naïve") provided forecasts for
 ### S2 Train and Test Error
 
 ### S3 Train and Test Error
+
 TBC
 
 ### S1 Train and Test Error
+
 TBC
 
 ## Model Selection and Forecasts
+
 The table below summarizes our selected model as well as forecast MAE and RMSE for each tesitng period. The subsequent sections provide additional discussion and figures about the forecast error for each period.
 
 | Testing Period | Selected Model | MAE    | RMSE   |
-| -------------- | -------------- | ------ | ------ |
+|----------------|----------------|--------|--------|
 | S1             | Naïve          | 144.83 | 272.21 |
 | S2             | SARIMA         | TBD    | TBD    |
 | S3             | TBD            | TBD    | TBD    |
@@ -391,15 +439,18 @@ The table below summarizes our selected model as well as forecast MAE and RMSE f
 
 ### S1 Forecasting Error
 
-
 ### S2 Forecasting Error
+
 TBC
 
 ### S3 Forecasting Error
+
 TBC
 
-### S1 Forecasting Error
+### S4 Forecasting Error
+
 TBC
 
 # Conclusion
-Thus far we have 
+
+Thus far we have
