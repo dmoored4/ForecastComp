@@ -9,7 +9,7 @@ output:
     number_sections: true
 ---
 
-```{r load-packages, echo=FALSE message=FALSE, warning = FALSE}
+```{r load-packages, echo=FALSE, message=FALSE, warning = FALSE}
 # Load necessary packages
 library(tidyverse)
 library(patchwork)
