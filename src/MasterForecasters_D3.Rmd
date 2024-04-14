@@ -1,0 +1,204 @@
+---
+title: "MasterForecasters_D3"
+author: "Daniel Moore"
+date: "2024-04-13"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r load-packages, message=FALSE, warning = FALSE}
+# Load necessary packages
+library(tidyverse)
+library(patchwork)
+library(GGally)
+library(lubridate)
+library(hms)
+
+library(fpp3)
+library(forecast)
+
+library(knitr)
+library(kableExtra)
+library(tinytex)
+library(latex2exp)
+```
+
+```{r load-data}
+# Load the data from "data/Data_S1.CSV" and "data/Data_S2.CSV"
+data <- read.csv("data/Data_S1.CSV")
+data <- rbind(data, read.csv("data/Data_S2.CSV"))
+data <- rbind(data, read.csv("data/Data_S3.CSV"))
+
+# Convert DATE_TIME
+data$DATE_TIME <- as_datetime(data$DATE_TIME)
+
+# delete duplicates based on DATE_TIME
+data <- data[!duplicated(data$DATE_TIME),]
+
+data <- as_tsibble(data, index=DATE_TIME)
+
+kable(data[5001:5005, ])
+```
+
+
+```{r weather-data}
+weather <- read.csv("data/piscataway, nj 2023-06-01 to 2023-08-31.csv")
+weather <- weather %>%
+  select(datetime, temp, dew, humidity, precip,
+         precipprob, winddir, cloudcover, visibility)
+weather$datetime <- as_datetime(weather$datetime)
+weather <- as_tsibble(weather, index=datetime)
+```
+
+```{r combine-data}
+data <- data %>%
+  mutate(datetime_rounded = floor_date(DATE_TIME, "hour"))
+
+data <- left_join(
+  data, rename(weather, DATE_TIME = datetime),
+  by = c("datetime_rounded" = "DATE_TIME"))
+
+data <- select(data, -datetime_rounded)
+```
+
+
+```{r poa-vs-time}
+POQ_vs_TIME <- data %>% autoplot(POA) + 
+  xlab("Date")
+
+POA_vs_LAST_7D <- data %>%
+  filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
+  autoplot(POA) +
+  xlab("Date")
+
+(POQ_vs_TIME + theme_light()) / (POA_vs_LAST_7D + theme_light())
+```
+
+```{r polar-cloud-cover, message=FALSE, console=FALSE}
+POA_vs_LAST_7D_CC <- data %>%
+  filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
+  ggplot(aes(x=DATE_TIME, y=POA, color=cloudcover)) +
+  geom_line() +
+  scale_colour_gradient(low = "yellow", high = "darkgrey")
+
+polar_cc <- data %>%
+  filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
+  ggplot(
+  aes(x=as.hms(DATE_TIME), y=POA,
+            group=yday(DATE_TIME), color=cloudcover)) +
+  geom_point(alpha = 0.75) +  # Scatter plot with 75% transparency
+  scale_colour_gradient(low = "yellow", high = "darkgrey") +
+  coord_polar()  # Converts the plot to polar coordinates
+  labs(title = "Polar Plot of POA vs Time of Day",
+       x = "Time of Day",
+       y = "POA",
+       colour = "Cloud Cover")
+  
+line_cc <- data %>%
+  filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
+  ggplot(
+  aes(x=as.hms(DATE_TIME), y=POA,
+            group=yday(DATE_TIME), color=cloudcover)) +
+  geom_line(alpha = 0.75) +  # Scatter plot with 75% transparency
+  scale_colour_gradient(low = "yellow", high = "darkgrey") +
+  labs(title = "Polar Plot of POA vs Time of Day",
+       x = "Time of Day",
+       y = "POA",
+       colour = "Cloud Cover")
+
+POA_vs_LAST_7D_CC / (line_cc + polar_cc)
+```
+
+
+
+```{r}
+data %>% ACF(POA, lag_max=3*24*6, season="day") |> autoplot()
+```
+
+
+```{r seasonal-mean}
+dcmp <- data %>%
+  model(stl = STL(POA ~ season(period="day")))
+
+components(dcmp) %>% autoplot()
+```
+
+```{r benchmarks}
+benchmarks <- data %>% model(
+  Seasonal_naive = SNAIVE(POA ~ lag("1 day")),
+  Naive = NAIVE(POA),
+  Drift = RW(POA ~ drift()),
+  Mean = MEAN(POA))
+
+benchmark_forecasts <- benchmarks %>% forecast(h="1 days")
+
+benchmark_forecasts %>%
+  autoplot(level = NULL) +
+  autolayer(data %>% filter(DATE_TIME >= max(DATE_TIME) - as.difftime(2, units = "days")), POA)
+```
+
+```{r seasonal-naive-residulas, warning=FALSE}
+gg_tsresiduals(benchmarks["Seasonal_naive"])
+
+gg_tsresiduals(benchmarks["Naive"])
+```
+
+Assume the residuals are white noise
+- Use ljung-box to determine whether the residuals are indistringuishable from white noise
+- If lb_pvalue > 0.05, then 
+
+```{r}
+augment(benchmarks) %>% features(.resid, ljung_box, lag=2*6*24)
+```
+
+# Data Transforms
+```{r}
+data <- data %>%
+  mutate(POA_log = log(POA + 1), # Add 1 to POA to avoid log(0)
+         POA_log = ifelse(is.infinite(POA_log) | is.nan(POA_log), NA, POA_log))
+data <- data %>%
+  mutate(POA_diffed_log = c(NA, diff(POA_log)))
+
+data %>% ggplot(aes(x=POA_log)) +
+  geom_histogram()
+
+data %>% ggplot(aes(x=POA_diffed_log)) +
+  geom_histogram()
+```
+
+
+```{r}
+data %>% gg_tsdisplay(
+  difference(POA, 144) |> difference()
+)
+```
+
+```{r fit-models}
+fit <- data %>% model(
+  stlf = decomposition_model(
+    STL(POA ~ trend(), robust=TRUE),
+    NAIVE(season_adjust)),
+  
+  timeserieslinearmodel = TSLM(POA ~ trend() + season("1 day")),
+  
+  SARIMA_111_111_24H = ARIMA(log(POA+1) ~ pdq(1, 1, 1) + PDQ(1, 1, 1, "1 day")),
+)
+```
+
+
+```{r plot_fit_forecats, warn = FALSE}
+fit_forecasts <- fit %>% forecast(h="1 days")
+
+fit_forecasts <- fit_forecasts %>%
+  mutate(.mean = pmax(.mean, 0))
+
+fit_forecasts %>%
+  autoplot(level = NULL) +
+  autolayer(data %>% filter(DATE_TIME >= max(DATE_TIME) - as.difftime(2, units = "days")), POA)
+```
+
+
+
+
+  
