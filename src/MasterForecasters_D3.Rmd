@@ -1,13 +1,15 @@
 ---
-title: "MasterForecasters_D3"
-author: "Daniel Moore"
-date: "2024-04-13"
+title: "Spring 2024 Forecasting Class Competition"
+date: "`r Sys.Date()`"
+author: "Master Forecasters"
 output:
-  pdf_document: default
-  html_document: default
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
 ---
 
-```{r load-packages, message=FALSE, warning = FALSE}
+```{r load-packages, echo=FALSE message=FALSE, warning = FALSE}
 # Load necessary packages
 library(tidyverse)
 library(patchwork)
@@ -23,8 +25,38 @@ library(kableExtra)
 library(tinytex)
 library(latex2exp)
 ```
+| Name          | Major Contribution                 |
+|---------------|------------------------------------|
+| Cory Petersen | Model                              |
+| Laila Saleh   | Data Transforms and Visualizations |
+| Daniel Moore  | .Rmd organization                  |
 
-```{r load-data}
+\newpage
+
+# Executive Summary {.unnumbered}
+This was our task:
+This is what we accomplished:
+This is why it's important:
+
+# Data Exploration
+Our task is to predict the Plane of Array (POA) Irradiance $\left( \frac{W}{m^2} \right)$ for measurements made at the Rutgers University Energy Lab at Richard Weeks Hall in 10-minute increments for the next 12-hours. The POA has been measured by a pyranometer with the same orientation as the solar array. This measurement is critical for modeling the performance of a Photo-Voltaic (PV) system. Predicting future POA enables operators to plan for optimize Distributed Energy Resources (DER). The data is provided in 10-minute increments from June 1, 2023 to August 2, 2023 with the following measurements:
+
+-   DATE_TIME: Date/time information
+-   AIRTEMP: Air temperature $(\mathrm{C})$
+-   RH_AVG: Humidity $(\mathrm{\%})$
+-   DEWPT: Dew point temperature $(\mathrm{C})$
+-   WS: Wind speed $\left(\frac{m}{s}\right)$
+-   GHI: Global Horizontal Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   DNI: Direct Normal Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   DIFF: Diffuse Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   POA: Plane-of-Array Irradiance $\left( \frac{W}{m^2} \right)$ measured from a pyranometer that has the exact same tilting
+
+## Loading the Data
+Load the data and concatenate, eliminating duplicates
+Processing DATE_TIME into a datetime object
+Make the data a tsibble object
+
+```{r load-data, echo=FALSE}
 # Load the data from "data/Data_S1.CSV" and "data/Data_S2.CSV"
 data <- read.csv("data/Data_S1.CSV")
 data <- rbind(data, read.csv("data/Data_S2.CSV"))
@@ -34,37 +66,56 @@ data <- rbind(data, read.csv("data/Data_S3.CSV"))
 data$DATE_TIME <- as_datetime(data$DATE_TIME)
 
 # delete duplicates based on DATE_TIME
-data <- data[!duplicated(data$DATE_TIME),]
+data <- data[!duplicated(data$DATE_TIME), ]
 
-data <- as_tsibble(data, index=DATE_TIME)
+data <- as_tsibble(data, index = DATE_TIME)
 
 kable(data[5001:5005, ])
 ```
 
+## Loading External Data
+Prediciting the POA is tantamont to predicting how sunny it is.
 
-```{r weather-data}
+We have obtained a dataset which contains historical data for the period covered, in hourly data
+
+We were not able to obtain historical day-ahead weather forecasts so we are using the historical data as a forecast
+
+This is valid because hourly forecasts for the next 24 hours tend to be very accurate
+
+```{r weather-data, echo=FALSE}
 weather <- read.csv("data/piscataway, nj 2023-06-01 to 2023-08-31.csv")
 weather <- weather %>%
   select(datetime, temp, dew, humidity, precip,
          precipprob, winddir, cloudcover, visibility)
 weather$datetime <- as_datetime(weather$datetime)
-weather <- as_tsibble(weather, index=datetime)
+weather <- as_tsibble(weather, index = datetime)
 ```
+Now we need to combine the data because the provided measurements are in 10-minute increments and the weather data is in hourly increments
 
+We create a temporary column in the provided data which is just the datetime rounded down to the nearest hour
+
+This gives a key that we can conduct a left join on
+
+We can then remove the temporary column
+
+It would be preferable to do linear interpolation on the weather data.
 ```{r combine-data}
 data <- data %>%
   mutate(datetime_rounded = floor_date(DATE_TIME, "hour"))
 
 data <- left_join(
   data, rename(weather, DATE_TIME = datetime),
-  by = c("datetime_rounded" = "DATE_TIME"))
+  by = c("datetime_rounded" = "DATE_TIME")
+)
 
 data <- select(data, -datetime_rounded)
 ```
 
-
+## Data Visualizations
+### POA Time Series
+First, we need to just examine the target variable
 ```{r poa-vs-time}
-POQ_vs_TIME <- data %>% autoplot(POA) + 
+POQ_vs_TIME <- data %>% autoplot(POA) +
   xlab("Date")
 
 POA_vs_LAST_7D <- data %>%
@@ -75,31 +126,42 @@ POA_vs_LAST_7D <- data %>%
 (POQ_vs_TIME + theme_light()) / (POA_vs_LAST_7D + theme_light())
 ```
 
+### POA vs Time and Cloud Cover
 ```{r polar-cloud-cover, message=FALSE, console=FALSE}
 POA_vs_LAST_7D_CC <- data %>%
   filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
-  ggplot(aes(x=DATE_TIME, y=POA, color=cloudcover)) +
+  ggplot(aes(x = DATE_TIME, y = POA, color = cloudcover)) +
   geom_line() +
   scale_colour_gradient(low = "yellow", high = "darkgrey")
 
 polar_cc <- data %>%
   filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
   ggplot(
-  aes(x=as.hms(DATE_TIME), y=POA,
-            group=yday(DATE_TIME), color=cloudcover)) +
+    aes(
+        x = as.hms(DATE_TIME),
+        y = POA,
+        group = yday(DATE_TIME),
+        color = cloudcover)
+  ) +
   geom_point(alpha = 0.75) +  # Scatter plot with 75% transparency
   scale_colour_gradient(low = "yellow", high = "darkgrey") +
   coord_polar()  # Converts the plot to polar coordinates
-  labs(title = "Polar Plot of POA vs Time of Day",
-       x = "Time of Day",
-       y = "POA",
-       colour = "Cloud Cover")
-  
+labs(
+  title = "Polar Plot of POA vs Time of Day",
+  x = "Time of Day",
+  y = "POA",
+  colour = "Cloud Cover"
+)
+
 line_cc <- data %>%
   filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
   ggplot(
-  aes(x=as.hms(DATE_TIME), y=POA,
-            group=yday(DATE_TIME), color=cloudcover)) +
+    aes(
+        x = as.hms(DATE_TIME),
+        y = POA,
+        group = yday(DATE_TIME),
+        color = cloudcover)
+  ) +
   geom_line(alpha = 0.75) +  # Scatter plot with 75% transparency
   scale_colour_gradient(low = "yellow", high = "darkgrey") +
   labs(title = "Polar Plot of POA vs Time of Day",
@@ -111,15 +173,14 @@ POA_vs_LAST_7D_CC / (line_cc + polar_cc)
 ```
 
 
-
 ```{r}
-data %>% ACF(POA, lag_max=3*24*6, season="day") |> autoplot()
+data %>% ACF(POA, lag_max = 3 * 24 * 6, season = "day") |> autoplot()
 ```
 
 
-```{r seasonal-mean}
+```{r STL-decomp, echo=FALSE}
 dcmp <- data %>%
-  model(stl = STL(POA ~ season(period="day")))
+  model(stl = STL(POA ~ season(period = "day")))
 
 components(dcmp) %>% autoplot()
 ```
@@ -129,13 +190,16 @@ benchmarks <- data %>% model(
   Seasonal_naive = SNAIVE(POA ~ lag("1 day")),
   Naive = NAIVE(POA),
   Drift = RW(POA ~ drift()),
-  Mean = MEAN(POA))
+  Mean = MEAN(POA)
+)
 
-benchmark_forecasts <- benchmarks %>% forecast(h="1 days")
+benchmark_forecasts <- benchmarks %>% forecast(h = "1 days")
 
 benchmark_forecasts %>%
   autoplot(level = NULL) +
-  autolayer(data %>% filter(DATE_TIME >= max(DATE_TIME) - as.difftime(2, units = "days")), POA)
+  autolayer(data %>% filter(
+    DATE_TIME >= max(DATE_TIME) - as.difftime(2, units = "days")), POA
+  )
 ```
 
 ```{r seasonal-naive-residulas, warning=FALSE}
@@ -149,7 +213,7 @@ Assume the residuals are white noise
 - If lb_pvalue > 0.05, then 
 
 ```{r}
-augment(benchmarks) %>% features(.resid, ljung_box, lag=2*6*24)
+augment(benchmarks) %>% features(.resid, ljung_box, lag = 2 * 6 * 24)
 ```
 
 # Data Transforms
@@ -160,10 +224,10 @@ data <- data %>%
 data <- data %>%
   mutate(POA_diffed_log = c(NA, diff(POA_log)))
 
-data %>% ggplot(aes(x=POA_log)) +
+data %>% ggplot(aes(x = POA_log)) +
   geom_histogram()
 
-data %>% ggplot(aes(x=POA_diffed_log)) +
+data %>% ggplot(aes(x = POA_diffed_log)) +
   geom_histogram()
 ```
 
@@ -177,25 +241,30 @@ data %>% gg_tsdisplay(
 ```{r fit-models}
 fit <- data %>% model(
   stlf = decomposition_model(
-    STL(POA ~ trend(), robust=TRUE),
-    NAIVE(season_adjust)),
-  
+    STL(POA ~ trend(), robust = TRUE),
+    NAIVE(season_adjust)
+  ),
   timeserieslinearmodel = TSLM(POA ~ trend() + season("1 day")),
-  
-  SARIMA_111_111_24H = ARIMA(log(POA+1) ~ pdq(1, 1, 1) + PDQ(1, 1, 1, "1 day")),
+  SARIMA_111_111_24H = ARIMA(
+    log(POA + 1) ~ pdq(1, 1, 1) + PDQ(1, 1, 1, "1 day")
+  ),
 )
 ```
 
 
 ```{r plot_fit_forecats, warn = FALSE}
-fit_forecasts <- fit %>% forecast(h="1 days")
+fit_forecasts <- fit %>% forecast(h = "1 days")
 
 fit_forecasts <- fit_forecasts %>%
   mutate(.mean = pmax(.mean, 0))
 
 fit_forecasts %>%
   autoplot(level = NULL) +
-  autolayer(data %>% filter(DATE_TIME >= max(DATE_TIME) - as.difftime(2, units = "days")), POA)
+  autolayer(
+    data %>% filter(
+      DATE_TIME >= max(DATE_TIME) - as.difftime(2, units = "days")
+    ), POA
+  )
 ```
 
 
