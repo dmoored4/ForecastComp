@@ -185,6 +185,7 @@ dcmp <- data %>%
 components(dcmp) %>% autoplot()
 ```
 
+# Benchmark Models
 ```{r benchmarks}
 benchmarks <- data %>% model(
   Seasonal_naive = SNAIVE(POA ~ lag("1 day")),
@@ -231,7 +232,7 @@ data %>% ggplot(aes(x = POA_diffed_log)) +
   geom_histogram()
 ```
 
-
+# Model Fitting
 ```{r}
 data %>% gg_tsdisplay(
   difference(POA, 144) |> difference()
@@ -267,7 +268,8 @@ fit_forecasts %>%
   )
 ```
 
+# Model Evaluation
+Here we talk about how we will evaluate the models
 
-
-
-  
+# Final Predicitions and Conclusions
+Here we talk about our final predictions and conclusions
