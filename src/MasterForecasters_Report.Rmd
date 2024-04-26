@@ -1,0 +1,316 @@
+---
+title: "Spring 2024 Forecasting Class Competition"
+date: "`r Sys.Date()`"
+author: "Master Forecasters"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+---
+```{r load-packages, echo=FALSE, message=FALSE, warning=FALSE}
+# Load necessary packages
+library(tidyverse)
+library(patchwork)
+library(GGally)
+library(lubridate)
+library(hms)
+
+library(fpp3)
+library(forecast)
+library(keras)
+library(tensorflow)
+
+library(knitr)
+library(kableExtra)
+library(tinytex)
+library(latex2exp)
+```
+| Name          | Major Contribution                 |
+|---------------|------------------------------------|
+| Cory Petersen | Modeling                           |
+| Laila Saleh   | Data Transforms and Visualizations |
+| Daniel Moore  | .Rmd organization                  |
+
+# Executive Summary {.unnumbered}
+We used a Long/Short Term Memory (LSTM) recurrent neural network for our final prediction of the Plane of Array Irradiance (POA) $\left( \frac{W}{m^2} \right)$. The LSTM outperformed the benchmark models including Drift, Mean, Naive, and Seasonal Naive as well as more complex models such as SARIMA, Holt-Winters, and SARIMA-X. Our prediction accuracy improved greatly when we incorporated basic weather data in the forecasts. Naturally, when skies are not all clear or all overcast, the POA measurements can vary widely as a cloud randomly casts a shadow over the array and then randomly moves out of the way. While we found the LSTM could reliably predict the moving average throughout the day, neither it or any other model could predict these random cycles. We estimate that such a prediction would rely on very detailed numerical weather simulations that may have a run time longer than the actual forecasting horizon.
+
+These findings are significant because they highlight how relatively simple neural networks have the flexibility to find complex dynamics amongst the available features and time. The trained LSTM is small enough that it could be deployed on a System on a Chip (SOC) as small as a $5 Raspberry Pi Zero, enabling local, real-time data processing and prediction. Even more useful is that the SOC could also continuously update the model with new observations as they occur. Deployment of distributed energy resources (DERs) with localized autonomy is an important step in building a Smart Grid that is cheaper to operate, more efficient, and more resilient.
+
+\newpage
+
+# Task
+Our task is to predict the Plane of Array (POA) Irradiance $\left( \frac{W}{m^2} \right)$ for measurements made at the Rutgers University Energy Lab at Richard Weeks Hall in 10-minute increments for the next 12-hours. The POA has been measured by a pyranometer with the same orientation as the solar array. This measurement is critical for modeling the performance of a Photo-Voltaic (PV) system. Predicting future POA enables operators to plan for optimize Distributed Energy Resources (DER). 
+
+# Data Exploration
+The first step is to gather all data into a workable format and visualize it various formats to gain insights about patterns and relationships.
+
+## Loading the Data
+The data is provided in 10-minute increments from June 1, 2023 to August 2, 2023 with the following measurements:
+
+-   DATE_TIME: Date/time information
+-   AIRTEMP: Air temperature $(\mathrm{C})$
+-   RH_AVG: Humidity $(\mathrm{\%})$
+-   DEWPT: Dew point temperature $(\mathrm{C})$
+-   WS: Wind speed $\left(\frac{m}{s}\right)$
+-   GHI: Global Horizontal Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   DNI: Direct Normal Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   DIFF: Diffuse Irradiance $\left( \frac{W}{m^2} \right)$ measured from a horizontal pyranometer mounted on a sun tracker
+-   POA: Plane-of-Array Irradiance $\left( \frac{W}{m^2} \right)$ measured from a pyranometer that has the exact same tilting
+
+The table below shows a few observations getting close to sunset (20:31) on July 7th, 2023.
+
+```{r load-data, echo=FALSE, message=FALSE, warning=FALSE}
+# List of file paths
+file_paths <- c(
+  "data/Data_S1.CSV",
+  "data/Data_S2.CSV",
+  "data/Data_S3.CSV",
+  "data/Data_S4.CSV")
+
+# Read and combine all CSV files
+data <- do.call(rbind, lapply(file_paths, read.csv))
+
+
+# Convert DATE_TIME
+data$DATE_TIME <- as_datetime(data$DATE_TIME)
+
+# delete duplicates based on DATE_TIME
+data <- data[!duplicated(data$DATE_TIME), ]
+
+data <- as_tsibble(data, index = DATE_TIME)
+
+weather <- read.csv("data/piscataway, nj 2023-06-01 to 2023-08-31.csv")
+weather <- weather %>%
+  select(datetime, temp, dew, humidity, precip,
+         precipprob, winddir, cloudcover, visibility)
+weather$datetime <- as_datetime(weather$datetime)
+weather <- as_tsibble(weather, index = datetime)
+
+data <- data %>%
+  mutate(datetime_rounded = floor_date(DATE_TIME, "hour"))
+
+data <- left_join(
+  data, rename(weather, DATE_TIME = datetime),
+  by = c("datetime_rounded" = "DATE_TIME")
+)
+
+data <- select(data, -datetime_rounded)
+```
+
+```{r kable-data, echo=FALSE}
+kable(data[5000:5005,["AIRTEMP"; "RH_AVG"]])
+```
+
+## Loading External Data
+Prediciting the POA is tantamount to predicting how sunny it is. We have also obtained historic, hourly-weather data for the time period. At a given time $t$, the data is treated as historic for time before $t$ and forecasted weather for time after $t$. This is a reasonable approach for the scope of this project as day-ahead hourly weather forecasts are very accurate and we are only using basic weather data. If deployed, the model could be easily modified to train on true forecasts and we do not expect a significant change in the model's performance.
+```{r kable-weather-data, echo=FALSE}
+kable(weather[120:125,])
+```
+
+Now we need to combine the data because the provided measurements are in 10-minute increments and the weather data is in hourly increments
+
+We create a temporary column in the provided data which is just the datetime rounded down to the nearest hour
+
+This gives a key that we can conduct a left join on33
+
+We can then remove the temporary column
+
+It would be preferable to do linear interpolation on the weather data.
+```{r combine-data, echo=false}
+
+kable(data[5000:5005,])
+```
+
+## Data Visualizations
+### POA Time Series
+First, we need to just examine the target variable
+```{r poa-vs-time}
+POQ_vs_TIME <- data %>% autoplot(POA) +
+  xlab("Date")
+
+POA_vs_LAST_7D <- data %>%
+  filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
+  autoplot(POA) +
+  xlab("Date")
+
+(POQ_vs_TIME + theme_light()) / (POA_vs_LAST_7D + theme_light())
+```
+
+### POA vs Time and Cloud Cover
+```{r polar-cloud-cover, message=FALSE, console=FALSE, echo=FALSE}
+POA_vs_LAST_7D_CC <- data %>%
+  filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
+  ggplot(aes(x = DATE_TIME, y = POA, color = cloudcover)) +
+  geom_line() +
+  scale_colour_gradient(low = "yellow", high = "darkgrey")
+
+polar_cc <- data %>%
+  filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
+  ggplot(
+    aes(
+        x = as_hms(DATE_TIME),
+        y = POA,
+        group = yday(DATE_TIME),
+        color = cloudcover)
+  ) +
+  geom_point(alpha = 0.75) +  # Scatter plot with 75% transparency
+  scale_colour_gradient(low = "yellow", high = "darkgrey") +
+  coord_polar()  # Converts the plot to polar coordinates
+labs(
+  title = "Polar Plot of POA vs Time of Day",
+  x = "Time of Day",
+  y = "POA",
+  colour = "Cloud Cover"
+)
+
+line_cc <- data %>%
+  filter(DATE_TIME >= max(DATE_TIME) - as.difftime(7, units = "days")) %>%
+  ggplot(
+    aes(
+        x = as_hms(DATE_TIME),
+        y = POA,
+        group = yday(DATE_TIME),
+        color = cloudcover)
+  ) +
+  geom_line(alpha = 0.75) +  # Scatter plot with 75% transparency
+  scale_colour_gradient(low = "yellow", high = "darkgrey") +
+  labs(title = "Polar Plot of POA vs Time of Day",
+       x = "Time of Day",
+       y = "POA",
+       colour = "Cloud Cover")
+
+POA_vs_LAST_7D_CC / (line_cc + polar_cc)
+```
+
+
+```{r STL-decomp, echo=FALSE}
+dcmp <- data %>%
+  model(stl = STL(POA ~ season(period = "day")))
+
+components(dcmp) %>% autoplot()
+```
+
+## Data Transforms
+The POA follows an exponential decay so we will need to apply transforms so that the target resembles normally distributed data. We applied a $log(x+1)$ transform and differenced it. The plots below show the resulting distributions. The majority of values are 0 because there is not irradiance at night, and $log(0)$ is undefined. Adding $1$ makes this a valid transform.
+```{r data-transforms, warning=FALSE, message=FALSE, echo=FALSE}
+data <- data %>%
+  mutate(POA_log = log(POA + 1), # Add 1 to POA to avoid log(0)
+         POA_log = ifelse(is.infinite(POA_log) | is.nan(POA_log), NA, POA_log))
+data <- data %>%
+  mutate(POA_diffed_log = c(NA, diff(POA_log)))
+
+POA_hist <- data %>% ggplot(aes(x = POA)) +
+  geom_histogram()
+
+POA_log_hist <- data %>% ggplot(aes(x = POA_log)) +
+  geom_histogram() +
+  xlab("log(POA+1)")
+
+POA_diffed_log_hist <- data %>% ggplot(aes(x = POA_diffed_log)) +
+  geom_histogram() +
+  xlab("diff(log(POA+1))")
+
+POA_hist / POA_log_hist / POA_diffed_log_hist
+```
+We will use this information in our models by letting the left-hand side of the model be `log(POA+1)` and ensuring our model has at least one non-seasonal difference.
+
+# Models
+
+## Benchmark Models
+```{r benchmarks, echo=FALSE}
+benchmarks <- data %>% model(
+  Seasonal_naive = SNAIVE(POA ~ lag("1 day")),
+  Naive = NAIVE(POA),
+  Drift = RW(POA ~ drift()),
+  Mean = MEAN(POA)
+)
+
+benchmark_forecasts <- benchmarks %>% forecast(h = "1 days")
+
+benchmark_forecasts %>%
+  autoplot(level = NULL) +
+  autolayer(data %>% filter(
+    DATE_TIME >= max(DATE_TIME) - as.difftime(2, units = "days")), POA
+  )
+```
+
+```{r seasonal-naive-residulas, warning=FALSE}
+gg_tsresiduals(benchmarks["Seasonal_naive"])
+
+gg_tsresiduals(benchmarks["Naive"])
+```
+
+Assume the residuals are white noise
+- Use ljung-box to determine whether the residuals are indistringuishable from white noise
+- If lb_pvalue > 0.05, then 
+
+```{r}
+augment(benchmarks) %>% features(.resid, ljung_box, lag = 2 * 6 * 24)
+```
+
+
+
+## Candidate Models
+
+### SARIMA
+#### Determing $d$ and $D$
+```{r}
+nonseasonal_no_diff <- data %>% ACF(POA) |> autoplot()
+seasonal_no_diff <- data %>% ACF(POA, season = "day") |> autoplot()
+
+nonseasonal_1_diff <- data %>% ACF(diff(POA)) |> autoplot()
+#seasonal_1_diff <- data %>% ACF(diff(POA), season = "day") |> autoplot()
+
+nonseasonal_no_diff / seasonal_no_diff
+
+nonseasonal_1_diff
+
+#nonseasonal_1_diff / seasonal_1_diff
+```
+
+
+### Holt-Winters
+### LSTM
+
+```{r}
+data %>% gg_tsdisplay(
+  difference(POA, 6*24) |> difference()
+)
+```
+
+```{r fit-models}
+fit <- data %>% model(
+  stlf = decomposition_model(
+    STL(POA ~ trend(), robust = TRUE),
+    NAIVE(season_adjust)
+  ),
+  timeserieslinearmodel = TSLM(POA ~ trend() + season("1 day")),
+  SARIMA_111_111_24H = ARIMA(
+    log(POA + 1) ~ pdq(1, 1, 1) + PDQ(1, 1, 1, "1 day")
+  )
+  #auto_sarima = ARIMA(log(POA+1) ~ pdq() + PDQ() + season("1 day"))
+)
+```
+
+
+```{r plot_fit_forecasts, warn = FALSE}
+fit_forecasts <- fit %>% forecast(h = "1 days")
+
+fit_forecasts <- fit_forecasts %>%
+  mutate(.mean = pmax(.mean, 0))
+
+fit_forecasts %>%
+  autoplot(level = NULL) +
+  autolayer(
+    data %>% filter(
+      DATE_TIME >= max(DATE_TIME) - as.difftime(2, units = "days")
+    ), POA
+  )
+```
+
+# Model Evaluation
+Here we talk about how we will evaluate the models
+
+# Final Predicitions and Conclusions
+Here we talk about our final predictions and conclusions
