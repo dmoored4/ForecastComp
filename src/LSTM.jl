@@ -32,7 +32,7 @@ begin
 	sort!(data, :DATE_TIME)
 
 
-	weather_cols = [:temp, :dew, :humidity, :precip, :windspeed, :winddir, :cloudcover, :visibility]
+	weather_cols = [:cloudcover, :visibility]
 	
 	weather = DataFrame(CSV.File("data/piscataway, nj 2023-06-01 to 2023-08-31.csv"))
 	select!(weather, :datetime, weather_cols)
@@ -59,7 +59,7 @@ begin
 	train_ratio = 0.6
 	
 	train_index = 1:(train_ratio * size(train_df, 1) |> round |> Int)
-	test_index = last(train_index):size(train_df, 1)
+	test_index = last(train_index)+1:size(train_df, 1)
 end
 
 # ╔═╡ 3c8714d5-ddea-48df-a1c0-396977d62f7c
@@ -93,11 +93,8 @@ begin
 	Test = [(past=x,next=y) for (x,y) in zip(X[1:end-1], Y[2:end])]
 end
 
-# ╔═╡ 03babfc8-f2f8-4207-b5d1-f74183c7c6c9
-train_df[train_index, [weather_cols; irradiance_cols]]
-
 # ╔═╡ aaff1889-9f4b-461f-98da-9f291a1dfe0f
-loss(model, X, y) = Flux.mse(model(X), y)
+loss(model, X, y) = Flux.mae(model(X), y)
 
 # ╔═╡ e71e7f0c-944e-4029-8653-c7f7f8155303
 loss(model::Chain, d::NamedTuple) = loss(model, d.past, d.next)
@@ -112,14 +109,21 @@ begin
 
 	Flux.reset!(model)
 	train_loss = [loss(model, first(Train))]
+	train_pred = [model(last(Train).past)]
 	Flux.reset!(model)
 	test_loss = [loss(model, first(Test))]
+	test_pred = [model(last(Test).past)]
+
+	η_log = [NaN]
 
 	model
 end
 
+# ╔═╡ 4deaeb27-f808-4fe2-9a06-ff5653d3502b
+η = 1e-6
+
 # ╔═╡ 2f3d651f-73c3-4fed-8b5c-74495d8d1f06
-opt_state = Flux.setup(Adam(1e-8), model)
+opt_state = Flux.setup(Adam(η), model)
 
 # ╔═╡ 37094551-adc7-4586-8a27-77908ab460ee
 function train!(loss, model, data, opt_state; train_log=[])
@@ -142,11 +146,61 @@ begin
 		Flux.reset!(model)
 		model(first(Test).past)
 		push!(test_loss, mean(loss(model, t) for t in Test[2:end]))
+		push!(train_pred, model(last(Train).past))
+		push!(test_pred, model(last(Test).past))
+		push!(η_log, η)
 	
 	end
-	gr()
-	plot([train_loss test_loss], label=["Train" "Test"], xscale=:log10)
 end
+
+# ╔═╡ eda38ec3-831e-49dc-a1ca-fc8be13fc6a9
+# ╠═╡ disabled = true
+#=╠═╡
+begin
+	gr(fontfamily=:Times)
+	animation_index = 2:length(train_loss) |> collect
+	animation_index = [1, 1, 1, 1, 1, 2, 2, 2, animation_index..., last(animation_index), last(animation_index), last(animation_index), last(animation_index), last(animation_index)]
+
+	# Create a plot
+	anim = @animate for i in animation_index
+    	plot(
+			layout=@layout((3, 1)),
+			legend=:outertopright,
+			size=(600, 800),
+		
+			plot(
+				title = "Training Iteration $i, η = $(η_log[i])",
+				1:i, [train_loss[1:i] test_loss[1:i]],
+				label=["train loss" "test loss"],
+				marker=:o, ms=2, markerstrokewidth=0.0,
+				color=[:blue :green], lw=[2 2], α=0.5,
+				xlabel="Iteration", ylabel="Mean Absolute Error",
+				xlims=(1,length(train_loss)),
+				xscale=:log2, xticks= 2 .^ (0:5)
+			),
+			plot(
+				title = "Training 1-step Predictions",
+				xlabel="Time Step", ylabel="POA",
+				[Train[end-1].next |> transpose train_pred[i] |> transpose],
+				label=["True" "Pred"],
+				color=[:grey :blue], α=[0.2 0.5], lw=[8 3],
+				ylims=(0, .4)
+			),
+			plot(
+				title = "Testing 1-step Predictions",
+				xlabel="Time Step", ylabel="POA",
+				[Test[end-1].next |> transpose test_pred[i] |> transpose],
+				label=["True" "Pred"],
+				color=[:grey :green], α=[0.2 0.5], lw=[8 3],
+				ylims=(0, .7)
+			)
+		)
+	end
+
+	gif(anim, "train_loss_animation.gif", fps = 4)
+
+end
+  ╠═╡ =#
 
 # ╔═╡ 3361dbc4-43f8-4bb1-888c-282b7526017f
 begin
@@ -166,8 +220,8 @@ end
 # ╔═╡ 90e049de-e01d-4d2e-81ba-8e4706bbc6cc
 begin
 #	ff = DateTime(Date(2023,08,4),Time(12,10))
-	ff = DateTime(Date(2023,07,1),Time(12,10))
-	lf = DateTime(Date(2023,08,4),Time(23,50))
+	ff = DateTime(Date(2023,07,9),Time(16,50))
+	lf = ff + Day(1)
 end
 
 # ╔═╡ 82ed185b-3202-4a5b-a0f5-76a706c39718
@@ -192,7 +246,7 @@ function forecast(data, firstforecast, lastforecast)
 	results = [model(M[:, firstforecast-1])[1]]
 	
 	for j in firstforecast:lastforecast-1
-		new_result = model([M[1:9, j];last(results)])[1]
+		new_result = model([M[1:length(weather_cols), j];last(results)])[1]
 		push!(results, new_result)
 	end
 
@@ -213,8 +267,101 @@ end
 
 # ╔═╡ b8e43593-6843-4087-994c-fef53e1baffc
 begin
-	predictions = forecast(combined_data, ff, lf)
+	predictions = forecast(combined_data, ff, lf+Day(6))
 end
+
+# ╔═╡ e0dec957-3e48-4f4b-83d9-e7e663f8d939
+begin
+	current_day = DateTime(Date(2023, 06, 01), Time(8,0)) + Day(1)
+	group_of_preds = []
+	while current_day <= data[last(train_index), :DATE_TIME]
+		out_df = forecast(combined_data, current_day, current_day + Day(1))
+		filter!(row -> !isnan(row.POA_pred), out_df)
+		push!(group_of_preds, out_df)
+		current_day += Day(1)
+	end
+end
+
+# ╔═╡ f6ce8e05-51ef-411a-a2fc-9a6127fca4d7
+begin
+	one_day_preds = vcat(group_of_preds...)
+	
+	RMSE = √((1/size(one_day_preds, 1)) * sum((one_day_preds.POA_pred .-  one_day_preds.POA ) .^2) )
+end
+
+# ╔═╡ 69dbf065-728b-4b4d-815f-47df58022ccc
+@df one_day_preds plot(
+	:DATE_TIME, [:POA :POA_pred],
+	line=[:solid :dot], lw=[1 1.5], color=[:grey :blue], α=[0.5 1]
+)
+
+# ╔═╡ edce0e97-8338-40ae-84f5-773605c7c5c2
+# ╠═╡ disabled = true
+#=╠═╡
+begin
+
+	last_week = filter(row -> row.DATE_TIME >= maximum(one_day_preds.DATE_TIME) - Dates.Day(6), one_day_preds)
+	
+	thist_anim = @animate for i in 1:1:size(last_week, 1)
+
+	    plot(
+			size=(800, 600),
+			title="Day-Ahead Predictions",
+			xlabel="Date", ylabel="POA",
+	        last_week[:, :DATE_TIME], last_week[:, :POA], label="Y",
+			color=:grey, lw=3, α=0.2,
+
+	    )
+
+		plot!(
+	        last_week[1:i, :DATE_TIME], last_week[1:i, :POA_pred], 
+	        line_z = last_week[1:i, :cloudcover],
+			lw=3,
+	        color=cgrad([:yellow, :grey]),
+	        label="Ŷ", cbarlims=(0,100)
+	    )
+	end
+	
+	gif(thist_anim, "time_series_one_day.gif", fps = 15)
+end
+  ╠═╡ =#
+
+# ╔═╡ 9ac4454c-5560-4cb3-961b-a69c8c20295c
+plot(
+	one_day_preds.DATE_TIME, one_day_preds.POA
+)
+
+# ╔═╡ 63650ba7-668c-4ce0-aa8e-5a35003f99ad
+begin
+	test_current_day = first(data[test_index, :DATE_TIME])
+	group_of_test_preds = []
+	while test_current_day <= data[last(test_index), :DATE_TIME]
+		out_df = forecast(combined_data, test_current_day, test_current_day + Day(1))
+		filter!(row -> !isnan(row.POA_pred), out_df)
+		push!(group_of_test_preds, out_df)
+		test_current_day += Day(1)
+	end
+end
+
+# ╔═╡ dbd8d63e-e09d-4c50-80e2-0af581d844af
+begin
+	one_day_test_preds = vcat(group_of_test_preds...)
+
+	filter!(row -> !isnan(row.POA), one_day_test_preds)
+	RMSE_test = √((1/size(one_day_test_preds, 1)) * sum((one_day_test_preds.POA_pred .-  one_day_test_preds.POA ) .^2) )
+end
+
+# ╔═╡ 736ee08d-753d-436c-8520-fd66dbe44d81
+MAE_test = mean(abs.(one_day_test_preds.POA .- one_day_test_preds.POA_pred))
+
+# ╔═╡ 9183d9bf-cf72-47d5-87ea-cc8f9fedbec7
+@df one_day_test_preds plot(
+	:DATE_TIME, [:POA :POA_pred],
+	line=[:solid :dot], lw=[1 1.5], color=[:grey :blue], α=[0.5 1]
+)
+
+# ╔═╡ b9a8792c-15ae-472e-bedb-d3ea185a6940
+one_day_test_preds
 
 # ╔═╡ 57959d1b-ca39-4019-9a47-3681029f4f58
 begin
@@ -225,22 +372,27 @@ begin
 	)
 end
 
-# ╔═╡ b50c17ee-5b86-4526-8ac6-47c38b143dd8
-combined_data[test_index, :]
+# ╔═╡ 1f109891-7a31-4393-8498-cff0a44c54e7
+begin
+	final_prediction = forecast(
+		combined_data,
+		DateTime(Date(2023, 8, 4), Time(12, 10)),
+		DateTime(Date(2023, 8, 4), Time(23, 50))
+	)
+
+	filter!(row -> !isnan(row.POA_pred), final_prediction)
+end
+
+# ╔═╡ ca87f660-3486-46e7-896c-b5fd6788a9f0
+# CSV.write("lstm_final_preds.csv", final_prediction[:, [:DATE_TIME, :POA_pred]])
+
+# ╔═╡ 9b4ce90e-3db8-48a4-bf42-53471363ca60
+@df final_prediction plot(:DATE_TIME, :POA_pred)
 
 # ╔═╡ 71a766cb-78da-4e82-8b44-077f61b5e22b
 begin
 	test_data = DataFrame(CSV.File("data/test_S4.csv"))
 end
-
-# ╔═╡ 47844281-3e04-4388-bbe8-68a686783939
-# ╠═╡ disabled = true
-#=╠═╡
-begin
-	ff_idx_3daylag = findlast(row -> row < ff - Day(3), predictions.DATE_TIME)
-	lf_idx = findfirst(row -> row > lf, predictions.DATE_TIME)
-end
-  ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2081,20 +2233,32 @@ version = "1.4.1+1"
 # ╠═83c6892c-2295-46fd-bf23-eee54f7ba6e0
 # ╠═3c8714d5-ddea-48df-a1c0-396977d62f7c
 # ╠═c3fd9501-67ed-43ce-8da2-b80ad0c20e33
-# ╠═03babfc8-f2f8-4207-b5d1-f74183c7c6c9
 # ╠═cd8b9a32-3cfe-4a03-88a8-d7caae70c058
 # ╠═aaff1889-9f4b-461f-98da-9f291a1dfe0f
 # ╠═e71e7f0c-944e-4029-8653-c7f7f8155303
+# ╠═4deaeb27-f808-4fe2-9a06-ff5653d3502b
 # ╠═2f3d651f-73c3-4fed-8b5c-74495d8d1f06
 # ╠═37094551-adc7-4586-8a27-77908ab460ee
 # ╠═e3f9de36-07ec-4a4d-8bf3-3b1e1ee79783
-# ╟─3361dbc4-43f8-4bb1-888c-282b7526017f
+# ╠═eda38ec3-831e-49dc-a1ca-fc8be13fc6a9
+# ╠═3361dbc4-43f8-4bb1-888c-282b7526017f
 # ╠═90e049de-e01d-4d2e-81ba-8e4706bbc6cc
 # ╠═82ed185b-3202-4a5b-a0f5-76a706c39718
 # ╠═b8e43593-6843-4087-994c-fef53e1baffc
+# ╠═e0dec957-3e48-4f4b-83d9-e7e663f8d939
+# ╠═f6ce8e05-51ef-411a-a2fc-9a6127fca4d7
+# ╠═69dbf065-728b-4b4d-815f-47df58022ccc
+# ╠═edce0e97-8338-40ae-84f5-773605c7c5c2
+# ╠═9ac4454c-5560-4cb3-961b-a69c8c20295c
+# ╠═63650ba7-668c-4ce0-aa8e-5a35003f99ad
+# ╠═dbd8d63e-e09d-4c50-80e2-0af581d844af
+# ╠═736ee08d-753d-436c-8520-fd66dbe44d81
+# ╠═9183d9bf-cf72-47d5-87ea-cc8f9fedbec7
+# ╠═b9a8792c-15ae-472e-bedb-d3ea185a6940
 # ╠═57959d1b-ca39-4019-9a47-3681029f4f58
-# ╠═b50c17ee-5b86-4526-8ac6-47c38b143dd8
+# ╠═1f109891-7a31-4393-8498-cff0a44c54e7
+# ╠═ca87f660-3486-46e7-896c-b5fd6788a9f0
+# ╠═9b4ce90e-3db8-48a4-bf42-53471363ca60
 # ╠═71a766cb-78da-4e82-8b44-077f61b5e22b
-# ╠═47844281-3e04-4388-bbe8-68a686783939
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
